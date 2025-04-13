@@ -3,6 +3,7 @@ package com.xxmicloxx.NoteBlockAPI;
 import com.xxmicloxx.NoteBlockAPI.songplayer.SongPlayer;
 import com.xxmicloxx.NoteBlockAPI.utils.MathUtils;
 import com.xxmicloxx.NoteBlockAPI.utils.Updater;
+import io.papermc.paper.threadedregions.scheduler.AsyncScheduler;
 import org.bstats.bukkit.Metrics;
 import org.bstats.charts.DrilldownPie;
 import org.bukkit.Bukkit;
@@ -19,9 +20,10 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Type;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Main class; contains methods for playing and adjusting songs for players
+ * 主类;包含为播放器播放和调整歌曲的方法
  */
 public class NoteBlockAPI extends JavaPlugin {
 
@@ -146,65 +148,61 @@ public class NoteBlockAPI extends JavaPlugin {
 		
 		
 		new NoteBlockPlayerMain().onEnable();
-		
-		getServer().getScheduler().runTaskLater(this, new Runnable() {
-			
-			@Override
-			public void run() {
-				Plugin[] plugins = getServer().getPluginManager().getPlugins();
-		        Type[] types = new Type[]{PlayerRangeStateChangeEvent.class, SongDestroyingEvent.class, SongEndEvent.class, SongStoppedEvent.class };
-		        for (Plugin plugin : plugins) {
-		            ArrayList<RegisteredListener> rls = HandlerList.getRegisteredListeners(plugin);
-		            for (RegisteredListener rl : rls) {
-		                Method[] methods = rl.getListener().getClass().getDeclaredMethods();
-		                for (Method m : methods) {
-		                    Type[] params = m.getParameterTypes();
-		                    param:
-		                    for (Type paramType : params) {
-		                    	for (Type type : types){
-		                    		if (paramType.equals(type)) {
-		                    			dependentPlugins.put(plugin, true);
-		                    			break param;
-		                    		}
-		                    	}
-		                    }
-		                }
 
-		            }
-		        }
-		        
-		        metrics.addCustomChart(new DrilldownPie("deprecated", () -> {
-			        Map<String, Map<String, Integer>> map = new HashMap<>();
-			        for (Plugin pl : dependentPlugins.keySet()){
-			        	String deprecated = dependentPlugins.get(pl) ? "yes" : "no";
-			        	Map<String, Integer> entry = new HashMap<>();
-				        entry.put(pl.getDescription().getFullName(), 1);
-				        map.put(deprecated, entry);
-			        }
-			        return map;
-			    }));
-			}
-		}, 1);
-		
-		getServer().getScheduler().runTaskTimerAsynchronously(this, new Runnable() {
-			
-			@Override
-			public void run() {
-				try {
-					if (Updater.checkUpdate("19287", getDescription().getVersion())){
-						Bukkit.getLogger().info(String.format("[%s] New update available!", plugin.getDescription().getName()));
+		Bukkit.getAsyncScheduler().runDelayed( this , task -> {
+
+				Plugin[] plugins = getServer().getPluginManager().getPlugins();
+				Type[] types = new Type[]{PlayerRangeStateChangeEvent.class, SongDestroyingEvent.class, SongEndEvent.class, SongStoppedEvent.class };
+				for (Plugin plugin : plugins) {
+					ArrayList<RegisteredListener> rls = HandlerList.getRegisteredListeners(plugin);
+					for (RegisteredListener rl : rls) {
+						Method[] methods = rl.getListener().getClass().getDeclaredMethods();
+						for (Method m : methods) {
+							Type[] params = m.getParameterTypes();
+							param:
+							for (Type paramType : params) {
+								for (Type type : types){
+									if (paramType.equals(type)) {
+										dependentPlugins.put(plugin, true);
+										break param;
+									}
+								}
+							}
+						}
+
 					}
-				} catch (IOException e) {
-					Bukkit.getLogger().info(String.format("[%s] Cannot receive update from Spigot resource page!", plugin.getDescription().getName()));
 				}
+
+				metrics.addCustomChart(new DrilldownPie("deprecated", () -> {
+					Map<String, Map<String, Integer>> map = new HashMap<>();
+					for (Plugin pl : dependentPlugins.keySet()){
+						String deprecated = dependentPlugins.get(pl) ? "yes" : "no";
+						Map<String, Integer> entry = new HashMap<>();
+						entry.put(pl.getDescription().getFullName(), 1);
+						map.put(deprecated, entry);
+					}
+					return map;
+				}));
+
+		}, 1, TimeUnit.SECONDS);
+
+		Bukkit.getAsyncScheduler().runDelayed( this , task -> {
+			try {
+				if (Updater.checkUpdate("19287", getDescription().getVersion())){
+					Bukkit.getLogger().info(String.format("[%s] New update available!", plugin.getDescription().getName()));
+				}
+			} catch (IOException e) {
+				Bukkit.getLogger().info(String.format("[%s] Cannot receive update from Spigot resource page!", plugin.getDescription().getName()));
 			}
-		}, 20*10, 20 * 60 * 60 * 24);
+
+		}, 1, TimeUnit.SECONDS);
 	}
 
 	@Override
 	public void onDisable() {    	
 		disabling = true;
-		Bukkit.getScheduler().cancelTasks(this);
+		Bukkit.getAsyncScheduler().cancelTasks(this);
+		//List<BukkitWorker> workers = Bukkit.getScheduler().getActiveWorkers();
 		List<BukkitWorker> workers = Bukkit.getScheduler().getActiveWorkers();
 		for (BukkitWorker worker : workers){
 			if (!worker.getOwner().equals(this))
@@ -215,11 +213,15 @@ public class NoteBlockAPI extends JavaPlugin {
 	}
 
 	public void doSync(Runnable runnable) {
-		getServer().getScheduler().runTask(this, runnable);
+		Bukkit.getGlobalRegionScheduler().run(this, task -> {
+			runnable.run();
+		});
 	}
 
 	public void doAsync(Runnable runnable) {
-		getServer().getScheduler().runTaskAsynchronously(this, runnable);
+		Bukkit.getAsyncScheduler().runNow(this, task -> {
+			runnable.run();
+		});
 	}
 
 	public boolean isDisabling() {
